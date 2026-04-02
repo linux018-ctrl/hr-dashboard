@@ -7,7 +7,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from data.mock_data import (
-    get_recruitment_funnel,
     get_recruitment_by_department,
     get_vacancy_status,
     get_monthly_recruitment_trend,
@@ -120,7 +119,8 @@ if page == "🏠 Dashboard 總覽":
     total_vacancy = sum(v["vacancy"] for v in vacancy)
     total_new_hires = sum(m["new_hires"] for m in movement)
     total_resignations = sum(m["resignations"] for m in movement)
-    avg_turnover = round(sum(m["monthly_turnover_rate"] for m in movement) / len(movement), 2)
+    avg_hc = round(sum((m["beginning_hc"] + m["ending_hc"]) / 2 for m in movement) / len(movement))
+    annual_turnover = round(total_resignations / avg_hc * 100, 1)
 
     # KPI 卡片
     c1, c2, c3, c4 = st.columns(4)
@@ -143,9 +143,9 @@ if page == "🏠 Dashboard 總覽":
     with k1:
         st.markdown(
             f'<div class="kpi-card" style="padding:36px 20px; border-top-color:#e74c3c">'
-            f'<div class="kpi-label">平均月離職率</div>'
-            f'<div class="kpi-value" style="color:#e74c3c; font-size:3rem">{avg_turnover}%</div>'
-            f'<div class="kpi-label" style="margin-top:8px">基於本年度 12 個月平均</div></div>',
+            f'<div class="kpi-label">年度離職率</div>'
+            f'<div class="kpi-value" style="color:#e74c3c; font-size:3rem">{annual_turnover}%</div>'
+            f'<div class="kpi-label" style="margin-top:8px">年度離職人數 / 平均在職人數</div></div>',
             unsafe_allow_html=True,
         )
 
@@ -183,38 +183,21 @@ if page == "🏠 Dashboard 總覽":
 elif page == "📋 招募與人才配置":
     st.markdown("# 📋 招募與人才配置報表")
 
-    r1, r2 = st.columns(2)
-
-    with r1:
-        st.markdown('<div class="section-header">🔻 招募漏斗</div>', unsafe_allow_html=True)
-        funnel = get_recruitment_funnel()
-        df_funnel = pd.DataFrame(funnel)
-        fig = go.Figure(go.Funnel(
-            y=df_funnel["stage"], x=df_funnel["count"],
-            textinfo="value+percent initial",
-            marker=dict(color=["#3498db", "#2980b9", "#1abc9c", "#16a085",
-                                "#2ecc71", "#27ae60", "#f39c12"]),
-            connector=dict(line=dict(color="#ddd")),
-        ))
-        fig.update_layout(title="招募漏斗 (Recruitment Funnel)")
-        st.plotly_chart(styled_fig(fig, 400), key="rec_funnel")
-
-    with r2:
-        st.markdown('<div class="section-header">📈 月度招募趨勢</div>', unsafe_allow_html=True)
-        trend = get_monthly_recruitment_trend()
-        df_trend = pd.DataFrame(trend)
-        fig = go.Figure()
-        for col_name, color, label in [
-            ("applications", "#3498db", "投遞"),
-            ("interviews", "#f39c12", "面試"),
-            ("offers", "#2ecc71", "錄取"),
-            ("hires", "#9b59b6", "報到"),
-        ]:
-            fig.add_scatter(x=df_trend["month"], y=df_trend[col_name],
-                            mode="lines+markers", name=label,
-                            line=dict(color=color, width=2.5))
-        fig.update_layout(title="月度招募趨勢")
-        st.plotly_chart(styled_fig(fig, 400), key="rec_trend")
+    st.markdown('<div class="section-header">📈 月度招募趨勢</div>', unsafe_allow_html=True)
+    trend = get_monthly_recruitment_trend()
+    df_trend = pd.DataFrame(trend)
+    fig = go.Figure()
+    for col_name, color, label in [
+        ("applications", "#3498db", "投遞"),
+        ("interviews", "#f39c12", "面試"),
+        ("offers", "#2ecc71", "錄取"),
+        ("hires", "#9b59b6", "報到"),
+    ]:
+        fig.add_scatter(x=df_trend["month"], y=df_trend[col_name],
+                        mode="lines+markers", name=label,
+                        line=dict(color=color, width=2.5))
+    fig.update_layout(title="月度招募趨勢")
+    st.plotly_chart(styled_fig(fig, 400), key="rec_trend")
 
     # 各部門招募統計
     st.markdown('<div class="section-header">🏢 各部門招募統計</div>', unsafe_allow_html=True)
@@ -251,19 +234,16 @@ elif page == "📋 招募與人才配置":
         fig.update_layout(coloraxis_showscale=False)
         st.plotly_chart(styled_fig(fig, 380), key="rec_days")
 
-    # 缺編表
+    # 缺編表（精簡：部門、職缺、HC、平均錄取天數）
     st.markdown('<div class="section-header">⚠️ 缺編情況與錄取時間</div>', unsafe_allow_html=True)
-    df_vac_display = df_vac.rename(columns={
-        "department": "部門", "budget_headcount": "編制人數", "current_headcount": "現有人數",
-        "vacancy": "缺編", "vacancy_rate": "缺編率(%)", "avg_days_to_fill": "平均錄取天數",
+    df_vac_display = df_vac[["department", "vacancy", "current_headcount", "avg_days_to_fill"]].rename(columns={
+        "department": "部門", "vacancy": "職缺", "current_headcount": "HC",
+        "avg_days_to_fill": "平均錄取天數",
     })
-    df_vac_display["狀態"] = df_vac_display["缺編"].apply(
-        lambda v: "✅ 滿編" if v == 0 else ("🔴 急缺" if v > 8 else "🟡 缺編中")
-    )
     st.dataframe(
         df_vac_display.style
-        .format({"缺編率(%)": "{:.1f}"})
-        .background_gradient(subset=["缺編"], cmap="Reds"),
+        .background_gradient(subset=["職缺"], cmap="Reds")
+        .background_gradient(subset=["平均錄取天數"], cmap="Oranges"),
         hide_index=True,
     )
 
